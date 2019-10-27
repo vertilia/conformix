@@ -13,8 +13,9 @@ with a possibility to provide command-line parameters for both.
 ./conformix /etc/nginx/sites-available/*.conf
 ```
 
-Configuration files must contain `@test` and `@test-result` directives in comments around normal configuration directives,
-which represent the curl commands to execute and specific patterns to look for inside the curl responses.
+Configuration files must contain `@test` directives followed by zero or more `@test-result` directives in comments around
+normal configuration instructions. These directives represent the curl commands to execute and specific patterns to look for
+inside the curl responses. This way `@test-result` directives only work with the response of the previous `@test` directive.
 
 ## Test directives format
 ```
