@@ -1,0 +1,84 @@
+#!/bin/bash
+
+# external dependencies: curl, grep, awk
+
+usage()
+{
+  echo "Usage: $(basename $0) [-h] [file [...]]
+Parses config files looking for lines starting with @test and @test-result directives in comments and executes the
+corresponding tests by running curl command with parameters following the @test directive. The received response is sent
+to grep command as many times as there are @test-result directives following the @test directive. When grep returns
+empty line this is considered an error and FAIL message is displayed.
+
+Test directives format:
+  @test [CURL_ARGS] URL
+  where
+    CURL_ARGS list of arguments to pass to curl
+    URL       url to test with curl call
+  @test-result [GREP_ARGS] PATTERN
+  where
+    GREP_ARGS list of arguments to pass to grep
+    PATTERN   grep pattern that must appear in curl response (extended regexp)
+
+Examples (parts of .conf files):
+  ## http://www.example.com/ must redirect to HTTPS
+  ## - 301 status must be set and
+  ## - \"Location\" header contains \"https:\" redirect
+  # @test -I http://www.example.com/
+  # @test-result '^HTTP.+ 301 '
+  # @test-result '^Location: https://www\.example\.com/'
+
+  ## https://www.example.com/ must have
+  ## - Content-Type header contains \"UTF-8\" and
+  # @test -I https://www.example.com/
+  # @test-result -i '^content-type:.+utf-8'
+  "
+}
+
+while getopts 'h' opt; do
+  case $opt in
+    h) usage; exit ;;
+  esac
+done
+
+shift $((OPTIND-1))
+
+if [ $# == 0 ]; then
+  usage
+  exit
+fi
+
+START_AT=`date +%s`
+CURL_CMD=
+RESPONSE=
+PASSED=0
+FAILED=0
+TOTAL=0
+
+while read line; do
+  case $line in
+    curl*)
+      CURL_CMD="$line"
+      curl_cmd_hash=`md5 -qs "$CURL_CMD"`
+      cache_var=RESPONSES_${curl_cmd_hash:0:7}
+      if [ -z "${!cache_var}" ]; then
+        RESPONSE=`eval $CURL_CMD`
+        eval "$cache_var=\"$RESPONSE\""
+      else
+        RESPONSE="${!cache_var}"
+      fi
+      ;;
+    *)
+      TOTAL=$(($TOTAL+1))
+      grep_cmd="$line"
+      if [ -z "$(echo "$RESPONSE" | eval "$grep_cmd")" ]; then
+        echo "FAIL: $CURL_CMD | $grep_cmd"
+        FAILED=$(($FAILED+1))
+      else
+        PASSED=$(($PASSED+1))
+      fi
+      ;;
+  esac
+done <<< "$(awk 'match($0, /^[[:space:]#\/]*@test(-result)?[[:space:]]+/) {print ($0 ~ /@test-result/ ? "egrep " : "curl -s ") substr($0, RLENGTH+1)}' $@)"
+
+echo -e "Total tests: $TOTAL, passed: $PASSED, failed: $FAILED, seconds: $(expr `date +%s` - $START_AT)"
